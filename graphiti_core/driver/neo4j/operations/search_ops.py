@@ -146,15 +146,16 @@ class Neo4jSearchOperations(SearchOperations):
         if filter_queries:
             filter_query = ' WHERE ' + (' AND '.join(filter_queries))
 
+        over_fetch = 2 * limit
+
         cypher = (
-            'MATCH (n:Entity)'
+            """
+            CALL db.index.vector.queryNodes('entity_name_embedding', $over_fetch, $search_vector)
+            YIELD node AS n, score
+            """
             + filter_query
             + """
-            WITH n, """
-            + get_vector_cosine_func_query(
-                'n.name_embedding', '$search_vector', GraphProvider.NEO4J
-            )
-            + """ AS score
+            WITH n, score
             WHERE score > $min_score
             RETURN
             """
@@ -168,6 +169,7 @@ class Neo4jSearchOperations(SearchOperations):
         records, _, _ = await executor.execute_query(
             cypher,
             search_vector=search_vector,
+            over_fetch=over_fetch,
             limit=limit,
             min_score=min_score,
             routing_='r',
@@ -312,15 +314,17 @@ class Neo4jSearchOperations(SearchOperations):
         if filter_queries:
             filter_query = ' WHERE ' + (' AND '.join(filter_queries))
 
+        over_fetch = 2 * limit
+
         cypher = (
-            'MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity)'
+            """
+            CALL db.index.vector.queryRelationships('edge_fact_embedding', $over_fetch, $search_vector)
+            YIELD relationship AS e, score
+            WITH e, score, startNode(e) AS n, endNode(e) AS m
+            """
             + filter_query
             + """
-            WITH DISTINCT e, n, m, """
-            + get_vector_cosine_func_query(
-                'e.fact_embedding', '$search_vector', GraphProvider.NEO4J
-            )
-            + """ AS score
+            WITH e, score, n, m
             WHERE score > $min_score
             RETURN
             """
@@ -334,6 +338,7 @@ class Neo4jSearchOperations(SearchOperations):
         records, _, _ = await executor.execute_query(
             cypher,
             search_vector=search_vector,
+            over_fetch=over_fetch,
             limit=limit,
             min_score=min_score,
             routing_='r',
@@ -495,16 +500,16 @@ class Neo4jSearchOperations(SearchOperations):
             group_filter_query += ' WHERE c.group_id IN $group_ids'
             query_params['group_ids'] = group_ids
 
+        over_fetch = 2 * limit
+
         cypher = (
-            'MATCH (c:Community)'
-            + group_filter_query
-            + """
-            WITH c,
             """
-            + get_vector_cosine_func_query(
-                'c.name_embedding', '$search_vector', GraphProvider.NEO4J
-            )
-            + """ AS score
+            CALL db.index.vector.queryNodes('community_name_embedding', $over_fetch, $search_vector)
+            YIELD node AS c, score
+            """
+            + (' WHERE c.group_id IN $group_ids' if group_ids is not None else '')
+            + """
+            WITH c, score
             WHERE score > $min_score
             RETURN
             """
@@ -518,6 +523,7 @@ class Neo4jSearchOperations(SearchOperations):
         records, _, _ = await executor.execute_query(
             cypher,
             search_vector=search_vector,
+            over_fetch=over_fetch,
             limit=limit,
             min_score=min_score,
             routing_='r',

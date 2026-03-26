@@ -140,6 +140,39 @@ def get_fulltext_indices(provider: GraphProvider) -> list[LiteralString]:
     ]
 
 
+def get_vector_indices(provider: GraphProvider, embedding_dim: int = 1536) -> list[LiteralString]:
+    """Return CREATE VECTOR INDEX statements for the given provider."""
+    from typing import cast
+
+    if provider == GraphProvider.NEO4J:
+        return cast(
+            list[LiteralString],
+            [
+                f"""CREATE VECTOR INDEX entity_name_embedding IF NOT EXISTS
+                FOR (n:Entity) ON n.name_embedding
+                OPTIONS {{indexConfig: {{
+                    `vector.dimensions`: {embedding_dim},
+                    `vector.similarity_function`: 'cosine'
+                }}}}""",
+                f"""CREATE VECTOR INDEX edge_fact_embedding IF NOT EXISTS
+                FOR ()-[e:RELATES_TO]-() ON e.fact_embedding
+                OPTIONS {{indexConfig: {{
+                    `vector.dimensions`: {embedding_dim},
+                    `vector.similarity_function`: 'cosine'
+                }}}}""",
+                f"""CREATE VECTOR INDEX community_name_embedding IF NOT EXISTS
+                FOR (n:Community) ON n.name_embedding
+                OPTIONS {{indexConfig: {{
+                    `vector.dimensions`: {embedding_dim},
+                    `vector.similarity_function`: 'cosine'
+                }}}}""",
+            ],
+        )
+
+    # Other providers: no vector index support yet
+    return []
+
+
 def get_nodes_query(name: str, query: str, limit: int, provider: GraphProvider) -> str:
     if provider == GraphProvider.FALKORDB:
         label = NEO4J_TO_FALKORDB_MAPPING[name]
