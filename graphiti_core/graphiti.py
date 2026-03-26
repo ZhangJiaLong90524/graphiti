@@ -63,6 +63,7 @@ from graphiti_core.search.search import SearchConfig, search
 from graphiti_core.search.search_config import DEFAULT_SEARCH_LIMIT, SearchResults
 from graphiti_core.search.search_config_recipes import (
     COMBINED_HYBRID_SEARCH_CROSS_ENCODER,
+    EDGE_HYBRID_SEARCH_CROSS_ENCODER,
     EDGE_HYBRID_SEARCH_NODE_DISTANCE,
     EDGE_HYBRID_SEARCH_RRF,
 )
@@ -1626,7 +1627,7 @@ class Graphiti:
         point for temporal relevance.
         """
         search_config = (
-            EDGE_HYBRID_SEARCH_RRF if center_node_uuid is None else EDGE_HYBRID_SEARCH_NODE_DISTANCE
+            EDGE_HYBRID_SEARCH_CROSS_ENCODER if center_node_uuid is None else EDGE_HYBRID_SEARCH_NODE_DISTANCE
         )
         search_config.limit = num_results
 
