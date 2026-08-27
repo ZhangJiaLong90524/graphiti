@@ -68,6 +68,26 @@ MAX_SEARCH_DEPTH = 3
 MAX_QUERY_LENGTH = 128
 
 
+async def _try_delegated_search(
+    driver: GraphDriver, method_name: str, *args: Any
+) -> Any | None:
+    """Dispatch to custom search_interface, then provider search_ops.
+
+    search_ops holds indexed queries (including Neo4j HNSW vector search). Empty
+    list is a valid result; only None means the shared Cypher fallback should run.
+    """
+    backend = driver.search_interface or driver.search_ops
+    if backend is None:
+        return None
+    method = getattr(backend, method_name, None)
+    if method is None:
+        return None
+    try:
+        return await method(driver, *args)
+    except NotImplementedError:
+        return None
+
+
 def calculate_cosine_similarity(vector1: list[float], vector2: list[float]) -> float:
     """
     Calculates the cosine similarity between two vectors using NumPy.
@@ -189,10 +209,11 @@ async def edge_fulltext_search(
     group_ids: list[str] | None = None,
     limit=RELEVANT_SCHEMA_LIMIT,
 ) -> list[EntityEdge]:
-    if driver.search_interface:
-        return await driver.search_interface.edge_fulltext_search(
-            driver, query, search_filter, group_ids, limit
-        )
+    delegated = await _try_delegated_search(
+        driver, 'edge_fulltext_search', query, search_filter, group_ids, limit
+    )
+    if delegated is not None:
+        return delegated
 
     # fulltext search over facts
     fuzzy_query = fulltext_query(query, group_ids, driver)
@@ -307,17 +328,19 @@ async def edge_similarity_search(
     limit: int = RELEVANT_SCHEMA_LIMIT,
     min_score: float = DEFAULT_MIN_SCORE,
 ) -> list[EntityEdge]:
-    if driver.search_interface:
-        return await driver.search_interface.edge_similarity_search(
-            driver,
-            search_vector,
-            source_node_uuid,
-            target_node_uuid,
-            search_filter,
-            group_ids,
-            limit,
-            min_score,
-        )
+    delegated = await _try_delegated_search(
+        driver,
+        'edge_similarity_search',
+        search_vector,
+        source_node_uuid,
+        target_node_uuid,
+        search_filter,
+        group_ids,
+        limit,
+        min_score,
+    )
+    if delegated is not None:
+        return delegated
 
     match_query = """
         MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity)
@@ -453,13 +476,17 @@ async def edge_bfs_search(
     group_ids: list[str] | None = None,
     limit: int = RELEVANT_SCHEMA_LIMIT,
 ) -> list[EntityEdge]:
-    if driver.search_interface:
-        try:
-            return await driver.search_interface.edge_bfs_search(
-                driver, bfs_origin_node_uuids, bfs_max_depth, search_filter, group_ids, limit
-            )
-        except NotImplementedError:
-            pass
+    delegated = await _try_delegated_search(
+        driver,
+        'edge_bfs_search',
+        bfs_origin_node_uuids,
+        bfs_max_depth,
+        search_filter,
+        group_ids,
+        limit,
+    )
+    if delegated is not None:
+        return delegated
 
     # vector similarity search over embedded facts
     if bfs_origin_node_uuids is None or len(bfs_origin_node_uuids) == 0:
@@ -583,10 +610,11 @@ async def node_fulltext_search(
     group_ids: list[str] | None = None,
     limit=RELEVANT_SCHEMA_LIMIT,
 ) -> list[EntityNode]:
-    if driver.search_interface:
-        return await driver.search_interface.node_fulltext_search(
-            driver, query, search_filter, group_ids, limit
-        )
+    delegated = await _try_delegated_search(
+        driver, 'node_fulltext_search', query, search_filter, group_ids, limit
+    )
+    if delegated is not None:
+        return delegated
 
     # BM25 search to get top nodes
     fuzzy_query = fulltext_query(query, group_ids, driver)
@@ -677,10 +705,17 @@ async def node_similarity_search(
     limit=RELEVANT_SCHEMA_LIMIT,
     min_score: float = DEFAULT_MIN_SCORE,
 ) -> list[EntityNode]:
-    if driver.search_interface:
-        return await driver.search_interface.node_similarity_search(
-            driver, search_vector, search_filter, group_ids, limit, min_score
-        )
+    delegated = await _try_delegated_search(
+        driver,
+        'node_similarity_search',
+        search_vector,
+        search_filter,
+        group_ids,
+        limit,
+        min_score,
+    )
+    if delegated is not None:
+        return delegated
 
     filter_queries, filter_params = node_search_filter_query_constructor(
         search_filter, driver.provider
@@ -795,13 +830,17 @@ async def node_bfs_search(
     group_ids: list[str] | None = None,
     limit: int = RELEVANT_SCHEMA_LIMIT,
 ) -> list[EntityNode]:
-    if driver.search_interface:
-        try:
-            return await driver.search_interface.node_bfs_search(
-                driver, bfs_origin_node_uuids, search_filter, bfs_max_depth, group_ids, limit
-            )
-        except NotImplementedError:
-            pass
+    delegated = await _try_delegated_search(
+        driver,
+        'node_bfs_search',
+        bfs_origin_node_uuids,
+        search_filter,
+        bfs_max_depth,
+        group_ids,
+        limit,
+    )
+    if delegated is not None:
+        return delegated
 
     if bfs_origin_node_uuids is None or len(bfs_origin_node_uuids) == 0 or bfs_max_depth < 1:
         return []
@@ -890,10 +929,11 @@ async def episode_fulltext_search(
     group_ids: list[str] | None = None,
     limit=RELEVANT_SCHEMA_LIMIT,
 ) -> list[EpisodicNode]:
-    if driver.search_interface:
-        return await driver.search_interface.episode_fulltext_search(
-            driver, query, _search_filter, group_ids, limit
-        )
+    delegated = await _try_delegated_search(
+        driver, 'episode_fulltext_search', query, _search_filter, group_ids, limit
+    )
+    if delegated is not None:
+        return delegated
 
     # BM25 search to get top episodes
     fuzzy_query = fulltext_query(query, group_ids, driver)
@@ -975,13 +1015,11 @@ async def community_fulltext_search(
     group_ids: list[str] | None = None,
     limit=RELEVANT_SCHEMA_LIMIT,
 ) -> list[CommunityNode]:
-    if driver.search_interface:
-        try:
-            return await driver.search_interface.community_fulltext_search(
-                driver, query, group_ids, limit
-            )
-        except NotImplementedError:
-            pass
+    delegated = await _try_delegated_search(
+        driver, 'community_fulltext_search', query, group_ids, limit
+    )
+    if delegated is not None:
+        return delegated
 
     # BM25 search to get top communities
     fuzzy_query = fulltext_query(query, group_ids, driver)
@@ -1065,13 +1103,11 @@ async def community_similarity_search(
     limit=RELEVANT_SCHEMA_LIMIT,
     min_score=DEFAULT_MIN_SCORE,
 ) -> list[CommunityNode]:
-    if driver.search_interface:
-        try:
-            return await driver.search_interface.community_similarity_search(
-                driver, search_vector, group_ids, limit, min_score
-            )
-        except NotImplementedError:
-            pass
+    delegated = await _try_delegated_search(
+        driver, 'community_similarity_search', search_vector, group_ids, limit, min_score
+    )
+    if delegated is not None:
+        return delegated
 
     # vector similarity search over entity names
     query_params: dict[str, Any] = {}
